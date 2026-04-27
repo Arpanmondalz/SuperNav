@@ -35,28 +35,56 @@ class MapsListener : NotificationListenerService() {
 
     // This function checks the Google Maps text and returns our ESP32 shortcode
     private fun getManeuverCode(instruction: String): String {
-        val lowerText = instruction.lowercase()
-
         // Order matters! Check for specific infrastructure before generic left/right turns
-        return when {
-            "flyover" in lowerText || "bridge" in lowerText -> "FO"
-            "slip road" in lowerText || "service road" in lowerText -> "SVR"
-            "roundabout" in lowerText -> "RA"
-            "u-turn" in lowerText -> "UT"
-            "sharp right" in lowerText -> "SHR"
-            "sharp left" in lowerText -> "SHL"
-            "slight right" in lowerText -> "SR"
-            "slight left" in lowerText -> "SL"
-            "turn right" in lowerText -> "TR"
-            "turn left" in lowerText -> "TL"
-            "keep right" in lowerText -> "KR"
-            "keep left" in lowerText -> "KL"
-            "merge" in lowerText -> "MG"
-            "exit" in lowerText || "ramp" in lowerText -> "EX"
-            "head" in lowerText || "continue" in lowerText || "straight" in lowerText -> "ST"
-            "arrive" in lowerText || "destination" in lowerText -> "DEST"
-            else -> "UNK" // Unknown instruction
+        val text = instruction.lowercase()
+
+        // 1. System Alerts (Highest Priority)
+        if (text.contains("rerouting")) return "RER"
+        if (text.contains("gps") || text.contains("lost")) return "GPS"
+
+        // 2. Destination
+        if (text.contains("arrive") || text.contains("destination")) return "DEST"
+
+        // 3. Complex Maneuvers
+        if (text.contains("u-turn") || text.contains("u turn")) {
+            return if (text.contains("left")) "UTL" else "UTR"
         }
+        if (text.contains("roundabout")) {
+            return if (text.contains("left")) "RAL" else "RAR"
+        }
+
+        // 4. Modifiers (Must check before basic left/right)
+        if (text.contains("sharp left")) return "SHL"
+        if (text.contains("sharp right")) return "SHR"
+        if (text.contains("slight left") || text.contains("keep left")) return "SL"
+        if (text.contains("slight right") || text.contains("keep right")) return "SR"
+
+        // 5. Basic Turns (This catches "left on North Ave" and exits safely!)
+        if (text.contains("left")) return "TL"
+        if (text.contains("right")) return "TR"
+
+        // 6. Infrastructure
+        if (text.contains("merge")) return "MG"
+        if (text.contains("exit")) return "EX"
+        if (text.contains("flyover") || text.contains("overpass")) return "FO"
+        if (text.contains("service road") || text.contains("slip road")) return "SVR"
+
+        // 7. Straight
+        if (text.contains("straight") || text.contains("continue")) return "ST"
+
+        // 8. Compass Directions (Lowest priority so street names don't trigger them)
+        if (text.contains("northwest") || text.contains("north-west")) return "NW";
+        if (text.contains("northeast") || text.contains("north-east")) return "NE";
+        if (text.contains("southwest") || text.contains("south-west")) return "SW";
+        if (text.contains("southeast") || text.contains("south-east")) return "SE";
+        if (text.contains("north")) return "N";
+        if (text.contains("south")) return "S";
+        if (text.contains("east")) return "E";
+        if (text.contains("west")) return "W";
+
+        // 9. FALLBACK
+        return "UNK"
+
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {}

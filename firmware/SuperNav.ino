@@ -17,7 +17,7 @@ U8G2_SH1107_SEEED_128X128_1_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 // --- Global State Variables ---
 String currentDistance = "Waiting...";
-const unsigned char* currentIcon = icon_straight;
+const unsigned char* currentIcon = icon_unknown;
 bool needsRedraw = true; // Only update the OLED when we get new data
 bool deviceConnected = false;
 
@@ -32,7 +32,7 @@ class ServerCallbacks: public BLEServerCallbacks {
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
       currentDistance = "Lost Phone";
-      currentIcon = icon_straight;
+      currentIcon = icon_unknown;
       needsRedraw = true;
       // Restart advertising so phone can reconnect
       BLEDevice::startAdvertising();
@@ -74,21 +74,43 @@ class CharacteristicCallbacks: public BLECharacteristicCallbacks {
 
     // Helper function to map the string code to the C-array icon
     void updateIcon(String code) {
-      if (code == "FO") currentIcon = icon_flyover;
-      else if (code == "SVR") currentIcon = icon_service_road;
-      else if (code == "RA") currentIcon = icon_roundabout_right; 
-      else if (code == "UT") currentIcon = icon_u_turn_right; 
-      else if (code == "SHR") currentIcon = icon_sharp_right;
-      else if (code == "SHL") currentIcon = icon_sharp_left;
-      else if (code == "SR" || code == "KR") currentIcon = icon_slight_right;
-      else if (code == "SL" || code == "KL") currentIcon = icon_slight_left;
-      else if (code == "TR") currentIcon = icon_turn_right;
-      else if (code == "TL") currentIcon = icon_turn_left;
+      // System
+      if (code == "RER") currentIcon = icon_reroute;
+      else if (code == "GPS") currentIcon = icon_gps_lost;
+      else if (code == "DEST") currentIcon = icon_destination;
+      
+      // Intersections & Infrastructure
+      else if (code == "FO") currentIcon = icon_flyover;
       else if (code == "MG") currentIcon = icon_merge;
       else if (code == "EX") currentIcon = icon_exit;
+      else if (code == "SVR") currentIcon = icon_service_road;
+      else if (code == "RAL") currentIcon = icon_roundabout_left; 
+      else if (code == "RAR") currentIcon = icon_roundabout_right; 
+      
+      // Basic Movements
       else if (code == "ST") currentIcon = icon_straight;
-      else if (code == "DEST") currentIcon = icon_destination;
-      else currentIcon = icon_straight; // Default fallback
+      else if (code == "TL") currentIcon = icon_turn_left;
+      else if (code == "TR") currentIcon = icon_turn_right;
+      else if (code == "SHL") currentIcon = icon_sharp_left;
+      else if (code == "SHR") currentIcon = icon_sharp_right;
+      else if (code == "SL") currentIcon = icon_slight_left;
+      else if (code == "SR") currentIcon = icon_slight_right;
+      else if (code == "UTL") currentIcon = icon_u_turn_left;
+      else if (code == "UTR") currentIcon = icon_u_turn_right; 
+      
+      // Compass Directions
+      else if (code == "N") currentIcon = icon_n;
+      else if (code == "S") currentIcon = icon_s;
+      else if (code == "E") currentIcon = icon_e;
+      else if (code == "W") currentIcon = icon_w;
+      else if (code == "NE") currentIcon = icon_ne;
+      else if (code == "NW") currentIcon = icon_nw;
+      else if (code == "SE") currentIcon = icon_se;
+      else if (code == "SW") currentIcon = icon_sw;
+      
+      // Fallback
+      else if (code == "UNK") currentIcon = icon_unknown;
+      else currentIcon = icon_unknown; 
     }
 };
 
