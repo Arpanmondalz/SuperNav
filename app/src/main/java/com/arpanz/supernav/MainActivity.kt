@@ -14,7 +14,10 @@ import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 
 class MainActivity : Activity() {
@@ -41,14 +44,20 @@ class MainActivity : Activity() {
         val cardColor = 0xFF1E1E1E.toInt()
         val whiteText = 0xFFFFFFFF.toInt()
 
-        // 2. Root Layout
+        // 2. Base Layout Setup (Scrollview wrapping a LinearLayout)
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
+            isFillViewport = true
+            setBackgroundColor(darkBg)
+        }
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(darkBg)
             setPadding(64, 120, 64, 64)
             gravity = Gravity.CENTER_HORIZONTAL
             fitsSystemWindows = true
         }
+        scrollView.addView(root)
 
         // 3. Header Title
         val titleView = TextView(this).apply {
@@ -60,11 +69,11 @@ class MainActivity : Activity() {
         }
         root.addView(titleView)
 
-        // 4. Status Card (Displays current navigation info)
+        // 4. Status Card
         statusCard = TextView(this).apply {
             text = "Ready to Sync"
             setTextColor(whiteText)
-            textSize = 18f
+            textSize = 16f
             background = getRoundedDrawable(cardColor, 24f)
             setPadding(48, 60, 48, 60)
             gravity = Gravity.CENTER
@@ -94,7 +103,6 @@ class MainActivity : Activity() {
         }
 
         val btnConnect = createStyledButton("2. CONNECT HUD", true) {
-            // BLE Permissions Check
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 requestPermissions(arrayOf(
                     android.Manifest.permission.BLUETOOTH_SCAN,
@@ -110,9 +118,76 @@ class MainActivity : Activity() {
 
         root.addView(btnPerm)
         root.addView(btnConnect)
-        setContentView(root)
 
-        // 6. Register Broadcast Receiver
+        // 6. Settings & Diagnostics UI
+        val prefs = getSharedPreferences("SuperNavPrefs", Context.MODE_PRIVATE)
+
+        val settingsLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = getRoundedDrawable(cardColor, 24f)
+            setPadding(40, 40, 40, 40)
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                setMargins(0, 40, 0, 40)
+            }
+        }
+
+        val settingsTitle = TextView(this).apply {
+            text = "Advanced Developer Settings"
+            setTextColor(0xFF888888.toInt())
+            textSize = 12f
+            setPadding(0, 0, 0, 30)
+        }
+
+        val diagToggle = Switch(this).apply {
+            text = "Enable Diagnostics Dump"
+            setTextColor(whiteText)
+            isChecked = prefs.getBoolean("DIAGNOSTICS_MODE", false)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("DIAGNOSTICS_MODE", isChecked).apply()
+                if (isChecked) {
+                    statusCard.text = "Diagnostics Active.\nWaiting for Maps..."
+                } else {
+                    statusCard.text = "Diagnostics Disabled."
+                }
+            }
+        }
+
+        val distInput = EditText(this).apply {
+            hint = "Distance Key (e.g. android.title)"
+            setHintTextColor(0xFF555555.toInt())
+            setTextColor(accentColor)
+            setText(prefs.getString("KEY_DISTANCE", "android.title"))
+            textSize = 14f
+        }
+
+        val instInput = EditText(this).apply {
+            hint = "Instruction Key (e.g. android.text)"
+            setHintTextColor(0xFF555555.toInt())
+            setTextColor(accentColor)
+            setText(prefs.getString("KEY_INSTRUCTION", "android.text"))
+            textSize = 14f
+        }
+
+        val btnSaveSettings = createStyledButton("SAVE KEYS", false) {
+            prefs.edit()
+                .putString("KEY_DISTANCE", distInput.text.toString().trim())
+                .putString("KEY_INSTRUCTION", instInput.text.toString().trim())
+                .apply()
+            statusCard.text = "Keys Saved successfully!"
+        }
+
+        settingsLayout.addView(settingsTitle)
+        settingsLayout.addView(diagToggle)
+        settingsLayout.addView(distInput)
+        settingsLayout.addView(instInput)
+        settingsLayout.addView(btnSaveSettings)
+
+        root.addView(settingsLayout)
+
+        // Set the active view to our scrollable container
+        setContentView(scrollView)
+
+        // 7. Register Broadcast Receiver
         val filter = IntentFilter("MapsDataUpdate")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(dataReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -122,7 +197,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // Helper function for rounded corners
     private fun getRoundedDrawable(color: Int, radius: Float): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE

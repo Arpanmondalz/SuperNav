@@ -1,5 +1,6 @@
-package com.arpanz.supernav // **MAKE SURE THIS MATCHES YOUR PACKAGE NAME**
+package com.arpanz.supernav
 
+import android.content.Context
 import android.content.Intent
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -8,44 +9,68 @@ class MapsListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (sbn.packageName == "com.google.android.apps.maps") {
-            val extras = sbn.notification.extras
+            val extras = sbn.notification.extras ?: return
 
-            // 1. Extract the specific strings (using .toString() because they are often stored as formatted text)
-            val distance = extras.getCharSequence("android.title")?.toString() ?: ""
-            val instruction = extras.getCharSequence("android.text")?.toString() ?: ""
+            // 1. Load the user's custom settings from memory
+            val prefs = applicationContext.getSharedPreferences("SuperNavPrefs", Context.MODE_PRIVATE)
+            val distanceKey = prefs.getString("KEY_DISTANCE", "android.title") ?: "android.title"
+            val instructionKey = prefs.getString("KEY_INSTRUCTION", "android.text") ?: "android.text"
+            val isDiagnosticsOn = prefs.getBoolean("DIAGNOSTICS_MODE", false)
 
-            // Ignore empty notifications (like "Maps is running in background")
-            if (distance.isEmpty() || instruction.isEmpty()) return
+            // 2. DIAGNOSTICS MODE: Dump everything to the screen
+            if (isDiagnosticsOn) {
+                val dump = StringBuilder("--- DIAGNOSTICS DUMP ---\n\n")
+                for (key in extras.keySet()) {
+                    @Suppress("DEPRECATION")
+                    dump.append("$key : ${extras.get(key)}\n\n")
+                }
 
-            // 2. Convert instruction to our shortcode
-            val code = getManeuverCode(instruction)
+                val intent = Intent("MapsDataUpdate")
+                intent.putExtra("raw_data", dump.toString())
+                intent.setPackage(applicationContext.packageName)
+                sendBroadcast(intent)
+                return
+            }
 
-            // 3. Create the exact payload we will send over Bluetooth
-            val payload = "$code|$distance"
+            // 3. NORMAL MODE: Extract the raw strings
+            // Based on your dump,
+            // android.title contains "Head northeast" and android.text is null.
+            val rawDistance = extras.getCharSequence(distanceKey)?.toString() ?: ""
+            val rawInstruction = extras.getCharSequence(instructionKey)?.toString() ?: ""
 
+            // Ignore only if BOTH are completely empty
+            if (rawDistance.isEmpty() && rawInstruction.isEmpty()) return
+
+            // Google Maps edge case: Combine them so our parser finds the instruction
+            // even if it's hiding in the "Title" field.
+            val combinedText = "$rawDistance $rawInstruction"
+            val code = getManeuverCode(combinedText)
+
+            // If rawInstruction is empty, it means Maps hasn't provided a numerical
+            // distance yet (like "Head northeast").
+            val finalDistance = if (rawInstruction.isEmpty()) "" else rawDistance
+
+            // 4. Create the exact payload we will send over Bluetooth
+            val payload = "$code|$finalDistance"
+
+            // 5. Send to Xiao
             BleManager.sendData(payload)
 
-            // 4. Broadcast it to the MainActivity
+            // 6. Broadcast to the MainActivity for debugging (Variables corrected here!)
             val intent = Intent("MapsDataUpdate")
-            intent.putExtra("raw_data", payload)
-            intent.setPackage(applicationContext.packageName) // Security rule
+            intent.putExtra("raw_data", "Sending Payload: $payload\n\nDebug Info:\nCode: $code\nDist: $finalDistance\nRaw Text: $combinedText")
+            intent.setPackage(applicationContext.packageName)
             sendBroadcast(intent)
         }
     }
 
-    // This function checks the Google Maps text and returns our ESP32 shortcode
     private fun getManeuverCode(instruction: String): String {
-        // Order matters! Check for specific infrastructure before generic left/right turns
         val text = instruction.lowercase()
 
-        // 1. System Alerts (Highest Priority)
         if (text.contains("rerouting")) return "RER"
         if (text.contains("gps") || text.contains("lost")) return "GPS"
-
-        // 2. Destination
         if (text.contains("arrive") || text.contains("destination")) return "DEST"
 
-        // 3. Complex Maneuvers
         if (text.contains("u-turn") || text.contains("u turn")) {
             return if (text.contains("left")) "UTL" else "UTR"
         }
@@ -53,38 +78,31 @@ class MapsListener : NotificationListenerService() {
             return if (text.contains("left")) "RAL" else "RAR"
         }
 
-        // 4. Modifiers (Must check before basic left/right)
         if (text.contains("sharp left")) return "SHL"
         if (text.contains("sharp right")) return "SHR"
         if (text.contains("slight left") || text.contains("keep left")) return "SL"
         if (text.contains("slight right") || text.contains("keep right")) return "SR"
 
-        // 5. Basic Turns (This catches "left on North Ave" and exits safely!)
         if (text.contains("left")) return "TL"
         if (text.contains("right")) return "TR"
 
-        // 6. Infrastructure
         if (text.contains("merge")) return "MG"
         if (text.contains("exit")) return "EX"
         if (text.contains("flyover") || text.contains("overpass")) return "FO"
         if (text.contains("service road") || text.contains("slip road")) return "SVR"
 
-        // 7. Straight
         if (text.contains("straight") || text.contains("continue")) return "ST"
 
-        // 8. Compass Directions (Lowest priority so street names don't trigger them)
-        if (text.contains("northwest") || text.contains("north-west")) return "NW";
-        if (text.contains("northeast") || text.contains("north-east")) return "NE";
-        if (text.contains("southwest") || text.contains("south-west")) return "SW";
-        if (text.contains("southeast") || text.contains("south-east")) return "SE";
-        if (text.contains("north")) return "N";
-        if (text.contains("south")) return "S";
-        if (text.contains("east")) return "E";
-        if (text.contains("west")) return "W";
+        if (text.contains("northwest") || text.contains("north-west")) return "NW"
+        if (text.contains("northeast") || text.contains("north-east")) return "NE"
+        if (text.contains("southwest") || text.contains("south-west")) return "SW"
+        if (text.contains("southeast") || text.contains("south-east")) return "SE"
+        if (text.contains("north")) return "N"
+        if (text.contains("south")) return "S"
+        if (text.contains("east")) return "E"
+        if (text.contains("west")) return "W"
 
-        // 9. FALLBACK
         return "UNK"
-
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification) {}
