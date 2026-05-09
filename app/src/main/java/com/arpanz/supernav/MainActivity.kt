@@ -16,177 +16,200 @@ import android.view.Gravity
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Switch
-import android.widget.TextView
+import android.widget.*
 
 class MainActivity : Activity() {
 
-    private lateinit var statusCard: TextView
+    private val darkBg = 0xFF121212.toInt()
+    private val accent = 0xFF03DAC5.toInt()
+    private val card   = 0xFF1E1E1E.toInt()
+    private val white  = 0xFFFFFFFF.toInt()
+    private val red    = 0xFFCF6679.toInt()
+    private val yellow = 0xFFFFB300.toInt()
+    private val grey   = 0xFF888888.toInt()
 
-    private val dataReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            val rawData = intent?.getStringExtra("raw_data") ?: return
-            statusCard.text = rawData
-            statusCard.setTextColor(0xFF03DAC5.toInt())
+    private lateinit var bleDot:      TextView
+    private lateinit var osmDot:      TextView
+    private lateinit var navDataText: TextView
+    private lateinit var btnSync:     Button
+    private var isRunning = false
+
+    // Receives navigation data from OsmAndConnector
+    private val navReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            val text = intent?.getStringExtra("nav_text") ?: return
+            navDataText.text = text
+
+            // Update the OsmAnd status dot based on the incoming messages
+            when {
+                text.contains("Connected ✓") || text.contains("→") -> {
+                    osmDot.text = "● OsmAnd Connected"
+                    osmDot.setTextColor(accent)
+                }
+                text.contains("disconnected", ignoreCase = true) || text.contains("not found") -> {
+                    osmDot.text = "○ OsmAnd Disconnected"
+                    osmDot.setTextColor(red)
+                }
+                text.contains("Start a route") -> {
+                    osmDot.text = "◌ Waiting for Route..."
+                    osmDot.setTextColor(yellow)
+                }
+            }
+        }
+    }
+
+    // Receives BLE connection state from BleManager
+    private val bleReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            val label = intent?.getStringExtra("ble_label") ?: return
+            val state = intent.getStringExtra("ble_state") ?: return
+            bleDot.text = label
+            bleDot.setTextColor(when (state) {
+                "CONNECTED"    -> accent
+                "DISCONNECTED" -> red
+                else           -> yellow
+            })
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Keep screen on while the app is open — critical for in-pocket use
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        val darkBg = 0xFF121212.toInt()
-        val accentColor = 0xFF03DAC5.toInt()
-        val cardColor = 0xFF1E1E1E.toInt()
-        val whiteText = 0xFFFFFFFF.toInt()
-
-        val scrollView = ScrollView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT)
-            isFillViewport = true
+        val scroll = ScrollView(this).apply {
             setBackgroundColor(darkBg)
+            isFillViewport = true
         }
-
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(64, 120, 64, 64)
             gravity = Gravity.CENTER_HORIZONTAL
             fitsSystemWindows = true
         }
-        scrollView.addView(root)
+        scroll.addView(root)
 
-        val titleView = TextView(this).apply {
-            text = "SUPER NAV"
-            textSize = 28f
-            setTextColor(accentColor)
-            typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-            setPadding(0, 0, 0, 80)
-        }
-        root.addView(titleView)
+        // Title
+        root.addView(label("SUPER NAV", 28f, accent,
+            Typeface.create("sans-serif-condensed", Typeface.BOLD), pad = 8))
 
-        statusCard = TextView(this).apply {
-            text = "Ready to Sync"
-            setTextColor(whiteText)
-            textSize = 16f
-            background = getRoundedDrawable(cardColor, 24f)
-            setPadding(48, 60, 48, 60)
-            gravity = Gravity.CENTER
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
-                setMargins(0, 0, 0, 80)
-            }
-        }
-        root.addView(statusCard)
+        // Status dots
+        bleDot = label("○ HUD Disconnected", 13f, red, pad = 4)
+        osmDot = label("○ OsmAnd Disconnected", 13f, red, pad = 32)
+        root.addView(bleDot)
+        root.addView(osmDot)
 
-        fun createStyledButton(label: String, isPrimary: Boolean = false, onClick: () -> Unit): Button {
-            return Button(this).apply {
-                text = label
-                setTextColor(if (isPrimary) darkBg else whiteText)
-                background = if (isPrimary) getRoundedDrawable(accentColor, 50f) else getRoundedDrawable(cardColor, 50f)
-                typeface = Typeface.DEFAULT_BOLD
-                setOnClickListener { onClick() }
-                layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 150).apply {
-                    setMargins(0, 20, 0, 20)
-                }
-            }
-        }
+        // Nav data card
+        root.addView(card("LIVE NAVIGATION") {
+            navDataText = label("Press Start to begin.", 15f, white)
+            addView(navDataText)
+        })
 
-        val btnPerm = createStyledButton("1. GRANT PERMISSIONS") {
-            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }
+        // Start / Stop button
+        btnSync = button("▶  START", primary = true) { toggleSync() }
+        root.addView(btnSync)
 
-        val btnBattery = createStyledButton("2. DISABLE BATTERY OPTIMIZATION") {
-            // Without this, Android kills the listener service after ~1 min in background
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val pm = getSystemService(POWER_SERVICE) as PowerManager
-                if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                    startActivity(intent)
-                } else {
-                    statusCard.text = "Battery optimization\nalready disabled ✓"
-                    statusCard.setTextColor(0xFF03DAC5.toInt())
-                }
-            }
-        }
+        // One-time setup buttons
+        root.addView(button("DISABLE BATTERY OPTIMIZATION") { requestBatteryExemption() })
 
-        val btnConnect = createStyledButton("3. CONNECT HUD", true) {
+        setContentView(scroll)
+
+        register(navReceiver, "NavDataUpdate")
+        register(bleReceiver, "BleStatusUpdate")
+    }
+
+    private fun toggleSync() {
+        isRunning = !isRunning
+        if (isRunning) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 requestPermissions(arrayOf(
                     android.Manifest.permission.BLUETOOTH_SCAN,
                     android.Manifest.permission.BLUETOOTH_CONNECT
                 ), 1)
-            } else {
-                requestPermissions(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION), 1)
             }
-            BleManager.connect(this@MainActivity)
-            statusCard.text = "Searching for SuperNav..."
-            statusCard.setTextColor(0xFFFFFFFF.toInt())
-        }
-
-        root.addView(btnPerm)
-        root.addView(btnBattery)
-        root.addView(btnConnect)
-
-        // Diagnostics toggle — kept for developer use
-        val prefs = getSharedPreferences("SuperNavPrefs", Context.MODE_PRIVATE)
-
-        val settingsLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            background = getRoundedDrawable(cardColor, 24f)
-            setPadding(40, 40, 40, 40)
-            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
-                setMargins(0, 40, 0, 40)
-            }
-        }
-
-        val settingsTitle = TextView(this).apply {
-            text = "Developer Settings"
-            setTextColor(0xFF888888.toInt())
-            textSize = 12f
-            setPadding(0, 0, 0, 30)
-        }
-
-        val diagToggle = Switch(this).apply {
-            text = "Enable Diagnostics Dump"
-            setTextColor(whiteText)
-            isChecked = prefs.getBoolean("DIAGNOSTICS_MODE", false)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("DIAGNOSTICS_MODE", isChecked).apply()
-                statusCard.text = if (isChecked) "Diagnostics Active.\nWaiting for Maps..." else "Diagnostics Disabled."
-                statusCard.setTextColor(0xFFFFFFFF.toInt())
-            }
-        }
-
-        settingsLayout.addView(settingsTitle)
-        settingsLayout.addView(diagToggle)
-        root.addView(settingsLayout)
-
-        setContentView(scrollView)
-
-        val filter = IntentFilter("MapsDataUpdate")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(dataReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            BleManager.start(this)
+            val serviceIntent = Intent(this, SuperNavService::class.java)
+            startForegroundService(serviceIntent)
+            btnSync.text = "■  STOP"
+            btnSync.background = rounded(red, 50f)
+            osmDot.text = "◌ Connecting to OsmAnd..."
+            osmDot.setTextColor(yellow)
         } else {
-            @Suppress("UnspecifiedRegisterReceiverFlag")
-            registerReceiver(dataReceiver, filter)
+            BleManager.stop()
+            val serviceIntent = Intent(this, SuperNavService::class.java)
+            stopService(serviceIntent)
+            btnSync.text = "▶  START"
+            btnSync.background = rounded(accent, 50f)
+            bleDot.text = "○ HUD Disconnected"; bleDot.setTextColor(red)
+            osmDot.text = "○ OsmAnd Disconnected"; osmDot.setTextColor(red)
+            navDataText.text = "Stopped."
         }
     }
 
-    private fun getRoundedDrawable(color: Int, radius: Float): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = radius
-            setColor(color)
+    private fun requestBatteryExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                })
+            } else {
+                navDataText.text = "Battery optimization already disabled ✓"
+            }
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // UI helpers (kept minimal)
+    // -------------------------------------------------------------------------
+
+    private fun label(
+        txt: String, size: Float, color: Int,
+        face: Typeface = Typeface.DEFAULT, pad: Int = 0
+    ) = TextView(this).apply {
+        text = txt; textSize = size; setTextColor(color); typeface = face
+        if (pad > 0) setPadding(0, 0, 0, pad)
+    }
+
+    private fun button(lbl: String, primary: Boolean = false, onClick: () -> Unit) =
+        Button(this).apply {
+            text = lbl
+            setTextColor(if (primary) darkBg else white)
+            background = rounded(if (primary) accent else card, 50f)
+            typeface = Typeface.DEFAULT_BOLD
+            setOnClickListener { onClick() }
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, 150).apply {
+                setMargins(0, 20, 0, 20)
+            }
+        }
+
+    private fun card(title: String, block: LinearLayout.() -> Unit) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = rounded(card, 24f)
+            setPadding(48, 40, 48, 40)
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                setMargins(0, 0, 0, 32)
+            }
+            addView(label(title, 11f, grey, Typeface.DEFAULT_BOLD, pad = 16))
+            block()
+        }
+
+    private fun rounded(color: Int, r: Float) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE; cornerRadius = r; setColor(color)
+    }
+
+    private fun register(receiver: BroadcastReceiver, action: String) {
+        val f = IntentFilter(action)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            registerReceiver(receiver, f, Context.RECEIVER_NOT_EXPORTED)
+        else
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(receiver, f)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        try { unregisterReceiver(dataReceiver) } catch (e: Exception) {}
+        try { unregisterReceiver(navReceiver) } catch (e: Exception) {}
+        try { unregisterReceiver(bleReceiver) } catch (e: Exception) {}
     }
 }
