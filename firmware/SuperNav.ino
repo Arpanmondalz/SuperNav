@@ -42,21 +42,22 @@ class ServerCallbacks: public BLEServerCallbacks {
 // --- BLE Data Receiver Callback ---
 class CharacteristicCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      String rxValue = pCharacteristic->getValue().c_str();
+      // Get the value directly as an Arduino String
+      String rxValue = pCharacteristic->getValue();
       
       if (rxValue.length() > 0) {
         Serial.print("Received Data: ");
         Serial.println(rxValue);
 
-        // We expect: CODE|DISTANCE|RAW_TEXT (e.g., "TR|70 m|Turn right")
         int firstPipe = rxValue.indexOf('|');
         int secondPipe = rxValue.indexOf('|', firstPipe + 1);
 
-        if (firstPipe > 0) {
+        // Ensure we actually found a pipe delimiter
+        if (firstPipe >= 0) {
           // 1. Extract the Code
           String code = rxValue.substring(0, firstPipe);
           
-          // 2. Extract the Distance (ignore everything after the second pipe)
+          // 2. Extract the Distance
           if (secondPipe > 0) {
             currentDistance = rxValue.substring(firstPipe + 1, secondPipe);
           } else {
@@ -129,7 +130,8 @@ void setup() {
 
   BLECharacteristic *pCharacteristic = pService->createCharacteristic(
                                          CHARACTERISTIC_UUID,
-                                         BLECharacteristic::PROPERTY_WRITE
+                                         BLECharacteristic::PROPERTY_WRITE | 
+                                         BLECharacteristic::PROPERTY_WRITE_NR // <-- ADD THIS
                                        );
 
   pCharacteristic->setCallbacks(new CharacteristicCallbacks());
